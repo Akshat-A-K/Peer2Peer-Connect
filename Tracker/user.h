@@ -1,0 +1,39 @@
+#ifndef USER_H
+#define USER_H
+
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+#include <mutex>
+#include <set>
+using namespace std;
+
+extern unordered_map<string, string> user_and_password;
+extern unordered_map<string, int> user_ports; 
+extern unordered_map<int, string> client_user;
+extern mutex user_mutex;
+extern unordered_map<string, string> group_leader;
+extern unordered_map<string, vector<string>> group_members;
+extern unordered_map<string, vector<string>> group_requests;
+extern mutex group_members_mutex;
+
+
+string create_user(const vector<string> &tokens);
+string login(const vector<string> &tokens, int client_fd);
+string logout(const vector<string> &tokens, int client_fd);
+string create_group(const vector<string> &tokens, int client_fd);
+string join_group(const vector<string> &tokens, int client_fd);
+string leave_group(const vector<string> &tokens, int client_fd);
+string list_groups(const vector<string> &tokens, int client_fd);
+string list_requests(const vector<string> &tokens, int client_fd);
+string accept_request(const vector<string> &tokens, int client_fd);
+// string list_files(const vector<string> &tokens, int client_fd);
+// string upload_file(const vector<string> &tokens, int client_fd);
+// string download_file(const vector<string> &tokens, int client_fd);
+// string stop_share(const vector<string> &tokens, int client_fd);
+// string show_downloads(const vector<string> &tokens, int client_fd);
+// string get_user_port(const string &username);
+// string get_group_leader(const string &group_id);
+
+#endif
