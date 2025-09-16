@@ -13,6 +13,3 @@
 
 # Keep tracker_info.txt
 !tracker_info.txt
-
-# Keep .gitignore itself
-!/.gitignore

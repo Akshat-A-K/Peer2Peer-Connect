@@ -230,8 +230,8 @@ int main(int argc, char* argv[])
     }
 
     start_sync_thread(peer_ip, peer_port);
-    this_thread::sleep_for(chrono::seconds(1));
-
+    sleep(1);
+    
     cout<<"Tracker "<<tracker_no<<" running at "<<ip<<":"<<port<<endl;
 
     int server;

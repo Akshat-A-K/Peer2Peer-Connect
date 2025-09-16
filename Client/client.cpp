@@ -220,7 +220,7 @@ int main(int argc , char *argv[])
         }
         else if(bytes==0)
         {
-            cout<<"Connection to tracker lost. Exiting...\n";
+            cout<<"Connection to tracker lost"<<endl;
             close(tracker_fd);
             tracker_fd=connect_to_tracker(trackers);
             cout<<"Please re-login to continue."<<endl;
