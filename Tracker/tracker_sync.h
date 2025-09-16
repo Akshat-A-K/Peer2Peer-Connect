@@ -12,6 +12,5 @@ extern bool is_sync_message;
 
 void start_sync_thread(string peer_ip, int peer_port);
 void send_sync_message(const string &msg);
-void sync_handle(int sync_fd);
 
 #endif

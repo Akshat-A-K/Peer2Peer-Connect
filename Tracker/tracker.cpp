@@ -107,53 +107,6 @@ void client_handle(int client)
         }
         else
         {
-            {
-                lock_guard<mutex> ulock(user_mutex);
-                lock_guard<mutex> glock(group_members_mutex);
-
-                if(client_user.find(client)!=client_user.end())
-                {
-                    string username=client_user[client];
-                    cout<<"Client "<<username<<" disconnected unexpectedly"<<endl;
-
-                    vector<string> groups_to_check;
-                    for(auto &it:group_members)
-                    {
-                        groups_to_check.push_back(it.first);
-                    }
-
-                    for(auto &group_id:groups_to_check)
-                    {
-                        if(group_leader[group_id]==username)
-                        {
-                            auto &members=group_members[group_id];
-                            if(members.size()==1)
-                            {
-                                group_leader.erase(group_id);
-                                group_members.erase(group_id);
-                                group_requests.erase(group_id);
-                                cout<<"Group "<<group_id<<" deleted as it had no more members"<<endl;
-                            }
-                            else
-                            {
-                                auto it=find(members.begin(), members.end(), username);
-                                if(it!=members.end()) members.erase(it);
-
-                                group_leader[group_id]=members.front();
-                                cout<<"Leadership of group "<<group_id<<" transferred to "<<group_leader[group_id]<<endl;
-                            }
-                        }
-                        else if(find(group_members[group_id].begin(), group_members[group_id].end(), username)!=group_members[group_id].end())
-                        {
-                            auto it=find(group_members[group_id].begin(), group_members[group_id].end(), username);
-                            group_members[group_id].erase(it);
-                        }
-                    }
-                    
-                    user_ports.erase(username);
-                    client_user.erase(client);
-                }
-            }
             close(client);
             return;
         }
