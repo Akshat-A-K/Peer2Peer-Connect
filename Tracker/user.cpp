@@ -64,9 +64,9 @@ string login(const vector<string> &tokens, int client_fd)
         lock_guard<mutex> lock(user_mutex);
         if(user_and_password.find(username)==user_and_password.end() || user_and_password[username]!=password)
         {
-            response="Invalid username or password";
+            return "Invalid username or password";
         }
-        else
+        if(client_fd!=-1)
         {
             bool logged=false;
             for(auto &i:client_user)
@@ -79,15 +79,12 @@ string login(const vector<string> &tokens, int client_fd)
             }
             if(logged)
             {
-                response="User already logged in";
+                return "User already logged in";
             }
-            else
-            {
-                client_user[client_fd]=username;
-                user_ports[username]=peer_port;
-                response="Login successful";
-            }
+            client_user[client_fd]=username;
         }
+        user_ports[username]=peer_port;
+        response="Login successful";
     }
     return response;
 }

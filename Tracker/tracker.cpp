@@ -11,6 +11,7 @@
 #include <fcntl.h>
 #include <cstring>
 #include <algorithm>
+#include "tracker_sync.h"
 using namespace std;
 
 void client_handle(int client)
@@ -96,6 +97,11 @@ void client_handle(int client)
             else
             {
                 response="Unknown command";
+            }
+            if(!is_sync_message) 
+            {
+                if(tokens[0]!="list_groups" && tokens[0]!="list_requests")
+                    send_sync_message(command); 
             }
             send(client, response.c_str(), response.size(), 0);
         }
@@ -214,6 +220,17 @@ int main(int argc, char* argv[])
         istringstream ls(lines[tracker_no-1]);
         ls>>ip>>port;
     }
+
+    string peer_ip;
+    int peer_port;
+    {
+        int peer_no=(tracker_no==1)?2:1;
+        istringstream ls(lines[peer_no-1]);
+        ls>>peer_ip>>peer_port;
+    }
+
+    start_sync_thread(peer_ip, peer_port);
+    this_thread::sleep_for(chrono::seconds(1));
 
     cout<<"Tracker "<<tracker_no<<" running at "<<ip<<":"<<port<<endl;
 
