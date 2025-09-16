@@ -5,7 +5,48 @@
 #include <thread>
 #include <fcntl.h>
 #include <cstring>
+#include <vector>
+#include <sstream>
 using namespace std;
+
+int connect_to_tracker(const vector<pair<string,int>> &trackers)
+{
+    int sock=0;
+    struct sockaddr_in server_address;
+    
+    for(auto &t:trackers)
+    {
+        string ip=t.first;
+        int port=t.second;
+
+        if((sock=socket(AF_INET, SOCK_STREAM, 0))<0)
+        {
+            perror("Socket creation failed");
+            exit(EXIT_FAILURE);
+        }
+        
+        server_address.sin_family=AF_INET;
+        server_address.sin_port=htons(port);
+        
+        if(inet_pton(AF_INET, ip.c_str(), &server_address.sin_addr)<=0)
+        {
+            perror("Invalid address/Address not supported");
+            close(sock);
+            continue;
+        }
+        
+        if(connect(sock, (struct sockaddr *)&server_address, sizeof(server_address))<0)
+        {
+            perror("Connection to tracker failed");
+            close(sock);
+            continue;
+        }
+        cout<<"Connected to tracker at "<<ip<<":"<<port<<endl;
+        return sock;
+    }
+    cout<<"Could not connect to any tracker. Exiting..."<<endl;
+    exit(0);
+}
 
 void client_server(int peer_port)
 {
@@ -118,25 +159,20 @@ int main(int argc , char *argv[])
     thread t(client_server, peer_port);
     t.detach();
 
+    vector<pair<string,int>> trackers;
+    istringstream iss(file_buffer);
     string ip;
     int port;
+    while(iss>>ip>>port)
     {
-        string line(file_buffer);
-        size_t space_pos=line.find(' ');
-        if(space_pos==(size_t)-1)
-        {
-            cout<<"Invalid tracker info format in file. Use <ip> <port>"<<endl;
-            return 0;
-        }
-        ip=line.substr(0, space_pos);
         try
         {
-            port=stoi(line.substr(space_pos+1));
             if(port<1024 || port>65535)
             {
                 cout<<"Port number must be between 1024 and 65535"<<endl;
-                return 0;
+                continue;
             }
+            trackers.push_back({ip, port});
         }
         catch(exception& e)
         {
@@ -145,33 +181,19 @@ int main(int argc , char *argv[])
         }
     }
 
-    cout<<"Client peer running at "<<peer_ip<<":"<<peer_port<<endl;
-    cout<<"Connecting to tracker at "<<ip<<":"<<port<<endl;
+    if(trackers.size()==0)
+    {
+        cout<<"No valid tracker info found"<<endl;
+        return 0;
+    }
 
+    cout<<"Available trackers:"<<endl;
+    for(auto &t:trackers)
+    {
+        cout<<t.first<<":"<<t.second<<endl;
+    }
 
-    int sock=0;
-    struct sockaddr_in server_address;
-    
-    if((sock=socket(AF_INET, SOCK_STREAM, 0))<0)
-    {
-        perror("Socket creation failed");
-        exit(EXIT_FAILURE);
-    }
-    
-    server_address.sin_family=AF_INET;
-    server_address.sin_port=htons(port);
-    
-    if(inet_pton(AF_INET, ip.c_str(), &server_address.sin_addr)<=0)
-    {
-        perror("Invalid address/Address not supported");
-        exit(EXIT_FAILURE);
-    }
-    
-    if(connect(sock, (struct sockaddr *)&server_address, sizeof(server_address))<0)
-    {
-        perror("Connection failed");
-        exit(EXIT_FAILURE);
-    }
+    int tracker_fd=connect_to_tracker(trackers);
     
     while(1)
     {
@@ -181,7 +203,7 @@ int main(int argc , char *argv[])
         if(command=="exit" || command=="quit")
         {
             string logout_msg="logout\n";
-            send(sock, logout_msg.c_str(), logout_msg.size(), 0);
+            send(tracker_fd, logout_msg.c_str(), logout_msg.size(), 0);
             break;
         }
         if(command.rfind("login", 0)==0)
@@ -189,9 +211,9 @@ int main(int argc , char *argv[])
             command+=" "+to_string(peer_port);
         }
         string message=command+"\n";
-        send(sock, message.c_str(), message.size(), 0);
+        send(tracker_fd, message.c_str(), message.size(), 0);
         char buffer[1024]={0};
-        int bytes=read(sock, buffer, 1024);
+        int bytes=read(tracker_fd, buffer, 1024);
         if(bytes>0)
         {
             cout<<"Tracker>> "<<buffer<<endl;
@@ -199,16 +221,18 @@ int main(int argc , char *argv[])
         else if(bytes==0)
         {
             cout<<"Connection to tracker lost. Exiting...\n";
-            close(sock);
-            exit(0);
+            close(tracker_fd);
+            tracker_fd=connect_to_tracker(trackers);
+            cout<<"Please re-login to continue."<<endl;
+            continue;
         }
         else
         {
             perror("Read error");
-            close(sock);
+            close(tracker_fd);
             exit(0);
         }
     }
-    close(sock);
+    close(tracker_fd);
     return 0;
 }    
