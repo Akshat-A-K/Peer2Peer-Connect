@@ -12,7 +12,11 @@
 #include <cstring>
 #include <algorithm>
 #include "tracker_sync.h"
+#include <mutex>
 using namespace std;
+
+bool running=true;
+mutex run_mutex;
 
 void client_handle(int client)
 {
@@ -187,6 +191,24 @@ int main(int argc, char* argv[])
     
     cout<<"Tracker "<<tracker_no<<" running at "<<ip<<":"<<port<<endl;
 
+    thread console_thread([]() 
+    {
+        string cmd;
+        while(1) 
+        {
+            if(!getline(cin, cmd)) 
+                break;
+            if(cmd=="exit" || cmd=="quit") 
+            {
+                lock_guard<mutex> lock(run_mutex);
+                running=false;
+                shutdown(sync_socket, SHUT_RDWR); 
+                break;
+            }
+        }
+    });
+    console_thread.detach();
+
     int server;
     struct sockaddr_in server_address;
     int opt=1;
@@ -233,15 +255,26 @@ int main(int argc, char* argv[])
 
     while(true)
     {
+        {
+            lock_guard<mutex> lock(run_mutex);
+            if(!running) 
+                break;
+        }
+
         struct sockaddr_in client;
         socklen_t client_length=sizeof(client);
         int client_fd=accept(server, (struct sockaddr *)&client, &client_length);
         if(client_fd<0)
         {
+            lock_guard<mutex> lock(run_mutex);
+            if(!running)
+                break;
             perror("Accept failed");
+            continue;
         }
         thread(client_handle, client_fd).detach();
     }
     close(server);
+    cout<<"Tracker shutting down..."<<endl;
     return 0;
 }

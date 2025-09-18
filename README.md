@@ -50,7 +50,7 @@ Clients can register, login, create/join groups, and manage group memberships. T
    ./client <IP>:<PORT> tracker_info.txt
    ```
 3. Use commands (see above) to interact with the system.
-4. Type `exit` or `quit` in client to logout and stop.
+4. Type `exit` or `quit` in client or tracker to logout and stop.
 
 ## Limitations
 - File upload/download and integrity checks are not yet implemented.
