@@ -5,6 +5,9 @@
 #include <iostream>
 #include <mutex>
 #include <cstring>
+#include <sstream>
+#include <vector>
+#include "user.h"
 using namespace std;
 
 int sync_socket=-1;
@@ -17,7 +20,8 @@ void start_sync_thread(string peer_ip, int peer_port)
     {
         while(1) 
         {
-            if((sync_socket=socket(AF_INET, SOCK_STREAM, 0))<0)
+            int s;
+            if((s=socket(AF_INET, SOCK_STREAM, 0))<0)
             {
                 perror("Socket creation failed");
                 sleep(2);
@@ -28,27 +32,72 @@ void start_sync_thread(string peer_ip, int peer_port)
             addr.sin_port=htons(peer_port);
             inet_pton(AF_INET, peer_ip.c_str(), &addr.sin_addr);
 
-            if(connect(sync_socket, (struct sockaddr*)&addr, sizeof(addr))<0) 
+            if(connect(s, (struct sockaddr*)&addr, sizeof(addr))<0) 
             {
-                close(sync_socket);
+                close(s);
                 sync_socket=-1;
                 sleep(2);
                 continue;
+            }
+
+            {
+                lock_guard<mutex> lock(sync_mutex);
+                sync_socket=s;
             }
 
             char buffer[1024];
             while(1) 
             {
                 memset(buffer, 0, sizeof(buffer));
-                int bytes=read(sync_socket, buffer, 1024);
-                if (bytes<=0) break;
+                int bytes=read(s, buffer, 1024);
+                if(bytes<=0) break;
 
                 is_sync_message=true;
                 string cmd(buffer, bytes);
+
+                while(!cmd.empty() && (cmd.back()=='\n' || cmd.back()=='\r')) 
+                    cmd.pop_back();
+                
+                vector<string> tokens;
+                string token;
+                istringstream iss(cmd);
+                while(iss>>token)
+                {
+                    tokens.push_back(token);
+                }
+                if(tokens.size()==0) continue;
+                else
+                {
+                    if(tokens[0]=="create_user")
+                    {
+                        create_user(tokens);
+                    }
+                    else if(tokens[0]=="create_group")
+                    {
+                        create_group(tokens, -1);
+                    }
+                    else if(tokens[0]=="join_group")
+                    {
+                        join_group(tokens, -1);
+                    }
+                    else if(tokens[0]=="accept_request")
+                    {
+                        accept_request(tokens, -1);
+                    }
+                    else if(tokens[0]=="leave_group")
+                    {
+                        leave_group(tokens, -1);
+                    }
+                    else if(tokens[0]=="list_groups" || tokens[0]=="list_requests")
+                    {
+                        
+                    }
+                }
                 is_sync_message=false;
             }
-            close(sync_socket);
+            close(s);
             sync_socket=-1;
+            sleep(2);
         }
     }).detach();
 }
@@ -58,6 +107,7 @@ void send_sync_message(const string &msg)
     lock_guard<mutex> lock(sync_mutex);
     if (sync_socket>0) 
     {
-        send(sync_socket, msg.c_str(), msg.size(), 0);
+        string m=msg+"\n";
+        send(sync_socket, m.c_str(), m.size(), 0);
     }
 }

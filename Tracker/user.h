@@ -33,7 +33,5 @@ string accept_request(const vector<string> &tokens, int client_fd);
 // string download_file(const vector<string> &tokens, int client_fd);
 // string stop_share(const vector<string> &tokens, int client_fd);
 // string show_downloads(const vector<string> &tokens, int client_fd);
-// string get_user_port(const string &username);
-// string get_group_leader(const string &group_id);
 
 #endif
