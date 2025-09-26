@@ -1,9 +1,11 @@
 #include "user.h"
+#include "files.h"
 #include <algorithm>
+#include <arpa/inet.h>
 using namespace std;
 
 unordered_map<string, string> user_and_password;
-unordered_map<string, int> user_ports; 
+unordered_map<string, string> user_ports; 
 unordered_map<int, string> client_user;
 unordered_map<string, string> group_leader;
 unordered_map<string, vector<string>> group_members;
@@ -51,15 +53,7 @@ string login(const vector<string> &tokens, int client_fd)
         string username, password;
         username=tokens[1];
         password=tokens[2];
-        int peer_port=0;
-        try
-        {
-            peer_port=stoi(tokens[3]);
-        }
-        catch(exception& e)
-        {
-            perror("Invalid port number");
-        }
+        string peer_port=tokens[3];
 
         lock_guard<mutex> lock(user_mutex);
         if(user_and_password.find(username)==user_and_password.end() || user_and_password[username]!=password)
@@ -139,6 +133,7 @@ string create_group(const vector<string> &tokens, int client_fd)
             string username=client_user[client_fd];
             group_leader[group_id]=username;
             group_members[group_id].push_back(username);
+            group_files[group_id]={};
             response="Group created successfully with ID: "+group_id;
         }
     }

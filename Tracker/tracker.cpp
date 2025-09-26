@@ -13,6 +13,7 @@
 #include <algorithm>
 #include "tracker_sync.h"
 #include <mutex>
+#include "files.h"
 using namespace std;
 
 bool running=true;
@@ -84,19 +85,19 @@ void client_handle(int client)
             }
             else if(tokens[0]=="upload_file")
             {
-                // response=upload_file(tokens, client);
+                response=upload_file(tokens, client);
             }
             else if(tokens[0]=="download_file")
             {
-                // response=download_file(tokens, client);
+                response=download_file(tokens, client);
             }
             else if(tokens[0]=="list_files")
             {
-                // response=list_files_in_group(tokens, client);
+                response=list_files_in_group(tokens, client);
             }
             else if(tokens[0]=="stop_share")
             {
-                // response=stop_share(tokens, client);
+                response=stop_share(tokens, client);
             }
             else
             {
@@ -104,7 +105,7 @@ void client_handle(int client)
             }
             if(!is_sync_message) 
             {
-                if(tokens[0]!="list_groups" && tokens[0]!="list_requests")
+                if(tokens[0]!="list_groups" && tokens[0]!="list_requests" && tokens[0]!="upload_file" && tokens[0]!="stop_share")
                     send_sync_message(command); 
             }
             send(client, response.c_str(), response.size(), 0);
@@ -266,9 +267,6 @@ int main(int argc, char* argv[])
         int client_fd=accept(server, (struct sockaddr *)&client, &client_length);
         if(client_fd<0)
         {
-            lock_guard<mutex> lock(run_mutex);
-            if(!running)
-                break;
             perror("Accept failed");
             continue;
         }
