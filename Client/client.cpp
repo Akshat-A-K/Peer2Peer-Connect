@@ -261,7 +261,6 @@ void download_file(int tracker_fd, const string &args)
         return;
     }
 
-    // Request tracker for file info
     string msg = "download_file " + group + " " + filename + " " + dest_path + "\n";
     send(tracker_fd, msg.c_str(), msg.size(), 0);
 
@@ -305,6 +304,7 @@ void download_file(int tracker_fd, const string &args)
 
     if (!line.empty() && line.back() == '\r')
         line.pop_back();
+
     istringstream h(line);
     string token;
     long filesize;
@@ -329,6 +329,7 @@ void download_file(int tracker_fd, const string &args)
     }
     if (!line.empty() && line.back() == '\r')
         line.pop_back();
+
     vector<string> piece_hashes;
     {
         istringstream phs(line);
@@ -350,6 +351,7 @@ void download_file(int tracker_fd, const string &args)
         string first;
         if (!(ps >> first))
         { /* no peers */
+
         }
         else
         {
