@@ -18,8 +18,6 @@
 #include <iomanip>
 using namespace std;
 
-// ...existing code...
-
 // Structure to hold download task information
 struct DownloadTask
 {
@@ -33,7 +31,7 @@ struct DownloadTask
     atomic<int> pieces_done;
     int num_pieces;
     mutex m;
-    bool completed = false;
+    bool completed=false;
     atomic<bool> cancelled{false};
     vector<thread> workers;
     atomic<bool> joined{false};
@@ -52,13 +50,13 @@ long get_filesize(const string &filepath)
 
 int connect_to_tracker(const vector<pair<string, int>> &trackers)
 {
-    int sock = 0;
+    int sock=0;
     struct sockaddr_in server_address;
 
     for (auto &t : trackers)
     {
-        string ip = t.first;
-        int port = t.second;
+    string ip=t.first;
+    int port=t.second;
 
         if ((sock = socket(AF_INET, SOCK_STREAM, 0)) < 0)
         {
@@ -82,10 +80,10 @@ int connect_to_tracker(const vector<pair<string, int>> &trackers)
             close(sock);
             continue;
         }
-        cout << "Connected to tracker at " << ip << ":" << port << endl;
+    cout<<"Connected to tracker at "<<ip<<":"<<port<<endl;
         return sock;
     }
-    cout << "Could not connect to any tracker. Exiting..." << endl;
+    cout<<"Could not connect to any tracker. Exiting..."<<endl;
     exit(0);
 }
 
@@ -216,8 +214,8 @@ void upload_file(int tracker_fd, const string &group_id, const string &filepath)
 
     char buffer[1024] = {0};
     int bytes = read(tracker_fd, buffer, sizeof(buffer));
-    if (bytes > 0)
-        cout << "Tracker>> " << string(buffer, bytes) << endl;
+        if (bytes > 0)
+            cout<<"Tracker>> "<<string(buffer, bytes)<<endl;
 }
 
 static string sha1_buf(const unsigned char *buf, size_t len)
@@ -263,7 +261,7 @@ void download_file(int tracker_fd, const string &args)
     string group, filename, dest_path;
     if (!(iss >> group >> filename >> dest_path))
     {
-        cout << "Usage: download_file <group_id> <file_name> <destination_path>" << endl;
+    cout<<"Usage: download_file <group_id> <file_name> <destination_path>"<<endl;
         return;
     }
 
@@ -277,7 +275,7 @@ void download_file(int tracker_fd, const string &args)
         int n = read(tracker_fd, buf, sizeof(buf));
         if (n <= 0)
         {
-            cout << "Tracker read error" << endl;
+            cout<<"Tracker read error"<<endl;
             return;
         }
         resp.append(buf, n);
@@ -288,14 +286,14 @@ void download_file(int tracker_fd, const string &args)
 
         if (resp.size() > 10 * 1024 * 1024)
         {
-            cout << "Tracker response too large" << endl;
+            cout<<"Tracker response too large"<<endl;
             return;
         }
     }
 
     if (resp.empty())
     {
-        cout << "Tracker response empty" << endl;
+    cout<<"Tracker response empty"<<endl;
         return;
     }
 
@@ -304,7 +302,7 @@ void download_file(int tracker_fd, const string &args)
 
     if (!getline(riss, line))
     {
-        cout << "Unexpected tracker response (empty)" << endl;
+    cout<<"Unexpected tracker response (empty)"<<endl;
         return;
     }
 
@@ -319,18 +317,18 @@ void download_file(int tracker_fd, const string &args)
     string filepath_on_peer;
     if (!(h >> token >> filesize >> sha_full >> num_pieces >> filepath_on_peer))
     {
-        cout << "Malformed tracker header: " << line << endl;
+    cout<<"Malformed tracker header: "<<line<<endl;
         return;
     }
     if (token != "FOUND")
     {
-        cout << "File not found on tracker: " << token << endl;
+    cout<<"File not found on tracker: "<<token<<endl;
         return;
     }
 
     if (!getline(riss, line))
     {
-        cout << "Malformed tracker response: missing piece hashes" << endl;
+    cout<<"Malformed tracker response: missing piece hashes"<<endl;
         return;
     }
     if (!line.empty() && line.back() == '\r')
@@ -346,7 +344,7 @@ void download_file(int tracker_fd, const string &args)
 
     if (!getline(riss, line))
     {
-        cout << "Malformed tracker response: missing peers" << endl;
+    cout<<"Malformed tracker response: missing peers"<<endl;
         return;
     }
     if (!line.empty() && line.back() == '\r')
@@ -378,7 +376,7 @@ void download_file(int tracker_fd, const string &args)
 
     if (peers.empty())
     {
-        cout << "No peers available" << endl;
+    cout<<"No peers available"<<endl;
         return;
     }
 
@@ -402,7 +400,7 @@ void download_file(int tracker_fd, const string &args)
     int fd = open(partname.c_str(), O_CREAT | O_RDWR, 0666);
     if (fd < 0)
     {
-        cout << "Failed to create part file at " << partname << endl;
+    cout<<"Failed to create part file at "<<partname<<endl;
         return;
     }
 
@@ -498,9 +496,7 @@ void download_file(int tracker_fd, const string &args)
                         lock_guard<mutex> lg(queue_mtx);
                         double progress = (double)(piece + 1) / num_pieces * 100.0;
                         char c = '%';
-                        cout << "\rThread " << tid
-                             << " downloading... " << fixed << setprecision(2)
-                             << progress << c << "c completed" << flush;
+                        cout<<"\rThread "<<tid<<" downloading... "<<fixed<<setprecision(2)<<progress<<c<<"c completed"<<flush;
                     }
                 }
 
@@ -535,7 +531,7 @@ void download_file(int tracker_fd, const string &args)
     int fd2 = open(partname.c_str(), O_RDONLY);
     if (fd2 < 0)
     {
-        cout << "Open assembled file failed" << endl;
+    cout<<"Open assembled file failed"<<endl;
         return;
     }
     SHA_CTX ctx;
@@ -556,7 +552,7 @@ void download_file(int tracker_fd, const string &args)
     {
         string finalname = dest_path + "/" + filename;
         rename(partname.c_str(), finalname.c_str());
-        cout << "Download complete: " << finalname << endl;
+    cout<<"Download complete: "<<finalname<<endl;
         task->completed = true;
         {
             lock_guard<mutex> lg(active_downloads_mutex);
@@ -566,7 +562,7 @@ void download_file(int tracker_fd, const string &args)
     }
     else
     {
-        cout << "Final SHA mismatch. Download incomplete or corrupted." << endl;
+    cout<<"Final SHA mismatch. Download incomplete or corrupted."<<endl;
     }
 }
 
@@ -575,7 +571,7 @@ void show_downloads()
     lock_guard<mutex> a(active_downloads_mutex);
     if (active_downloads.empty())
     {
-        cout << "No downloads" << endl;
+    cout<<"No downloads"<<endl;
         return;
     }
     for (auto &kv : active_downloads)
@@ -584,11 +580,11 @@ void show_downloads()
         int done = task->pieces_done.load();
         int total = task->num_pieces;
         int percent = (total > 0) ? (done * 100 / total) : 0;
-        cout << task->filename << " (" << task->group_id << ") ";
+    cout<<task->filename<<" ("<<task->group_id<<") ";
         if (task->completed)
-            cout << "Completed 100% [" << total << "/" << total << "]" << endl;
+            cout<<"Completed 100% ["<<total<<"/"<<total<<"]"<<endl;
         else
-            cout << percent << "% [" << done << "/" << total << "]" << endl;
+            cout<<percent<<"% ["<<done<<"/"<<total<<"]"<<endl;
     }
 }
 
@@ -631,7 +627,7 @@ void stop_all_downloads()
     }
 
     for (auto &f : stopped_files)
-        cout << "Stopped download: " << f << endl;
+    cout<<"Stopped download: "<<f<<endl;
 }
 
 void list_files(int tracker_fd, const string &group_id)
@@ -642,10 +638,9 @@ void list_files(int tracker_fd, const string &group_id)
     char buffer[4096] = {0};
     int bytes = read(tracker_fd, buffer, sizeof(buffer));
     if (bytes > 0)
-        cout << "Tracker>>\n"
-             << string(buffer, bytes) << endl;
+    cout<<"Tracker>>\n"<<string(buffer, bytes)<<endl;
     else
-        cout << "RAW tracker response: " << string(buffer, bytes) << endl;
+    cout<<"RAW tracker response: "<<string(buffer, bytes)<<endl;
 }
 
 void stop_share(int tracker_fd, const string &group_id, const string &filename)
@@ -657,21 +652,21 @@ void stop_share(int tracker_fd, const string &group_id, const string &filename)
     char buffer[1024] = {0};
     int bytes = read(tracker_fd, buffer, sizeof(buffer));
     if (bytes > 0)
-        cout << "Tracker>> " << string(buffer, bytes) << endl;
+        cout<<"Tracker>> "<<string(buffer, bytes)<<endl;
 }
 
 int main(int argc, char *argv[])
 {
     if (argc != 3)
     {
-        cout << "Usage: " << argv[0] << " <ip:port> tracker_info.txt" << endl;
+        cout<<"Usage: "<<argv[0]<<" <ip:port> tracker_info.txt"<<endl;
         return 0;
     }
     string peer_info = argv[1];
     size_t pos = peer_info.find(':');
     if (pos == (size_t)-1)
     {
-        cout << "Invalid peer info format. Use <ip:port>" << endl;
+    cout<<"Invalid peer info format. Use <ip:port>"<<endl;
         return 0;
     }
 
@@ -688,7 +683,7 @@ int main(int argc, char *argv[])
     }
     catch (exception &e)
     {
-        cout << e.what() << endl;
+                cout<<e.what()<<endl;
     }
 
     char *filename = argv[2];
@@ -724,35 +719,35 @@ int main(int argc, char *argv[])
         {
             if (port < 1024 || port > 65535)
             {
-                cout << "Port number must be between 1024 and 65535" << endl;
+                cout<<"Port number must be between 1024 and 65535"<<endl;
                 continue;
             }
             trackers.push_back({ip, port});
         }
         catch (exception &e)
         {
-            cout << e.what() << endl;
+            cout<<e.what()<<endl;
             return 0;
         }
     }
 
     if (trackers.size() == 0)
     {
-        cout << "No valid tracker info found" << endl;
+    cout<<"No valid tracker info found"<<endl;
         return 0;
     }
 
-    cout << "Available trackers:" << endl;
+    cout<<"Available trackers:"<<endl;
     for (auto &t : trackers)
     {
-        cout << t.first << ":" << t.second << endl;
+    cout<<t.first<<":"<<t.second<<endl;
     }
 
     int tracker_fd = connect_to_tracker(trackers);
 
     while (1)
     {
-        cout << ">> ";
+    cout<<">> ";
         string command;
         getline(cin, command);
         if (command == "exit" || command == "quit")
@@ -767,7 +762,7 @@ int main(int argc, char *argv[])
             stop_all_downloads();
             string logout_msg = "logout\n";
             send(tracker_fd, logout_msg.c_str(), logout_msg.size(), 0);
-            cout << "Logged out and stopped active downloads" << endl;
+                cout<<"Logged out and stopped active downloads"<<endl;
             continue;
         }
         if (command.rfind("login", 0) == 0)
@@ -781,7 +776,7 @@ int main(int argc, char *argv[])
             iss >> cmd >> group_id >> filepath;
             if (group_id.empty() || filepath.empty())
             {
-                cout << "Usage: upload_file <group_id> <file_path>\n";
+                cout<<"Usage: upload_file <group_id> <file_path>\n";
                 continue;
             }
             upload_file(tracker_fd, group_id, filepath);
@@ -791,7 +786,7 @@ int main(int argc, char *argv[])
         {
             if (command.size() <= 14)
             {
-                cout << "Usage: download_file <group_id> <file_name> <destination_path>" << endl;
+                cout<<"Usage: download_file <group_id> <file_name> <destination_path>"<<endl;
                 continue;
             }
             string filename = command.substr(14);
@@ -802,7 +797,7 @@ int main(int argc, char *argv[])
         {
             if (command.size() <= 11)
             {
-                cout << "Usage: list_files <group_id>" << endl;
+                cout<<"Usage: list_files <group_id>"<<endl;
                 continue;
             }
             string group_id = command.substr(11);
@@ -833,14 +828,14 @@ int main(int argc, char *argv[])
         int bytes = read(tracker_fd, buffer, 1024);
         if (bytes > 0)
         {
-            cout << "Tracker>> " << buffer << endl;
+            cout<<"Tracker>> "<<buffer<<endl;
         }
         else if (bytes == 0)
         {
-            cout << "Connection to tracker lost" << endl;
+            cout<<"Connection to tracker lost"<<endl;
             close(tracker_fd);
             tracker_fd = connect_to_tracker(trackers);
-            cout << "Please re-login to continue." << endl;
+            cout<<"Please re-login to continue."<<endl;
             continue;
         }
         else
