@@ -1,170 +1,115 @@
 # P2P File Sharing System with Redundant Trackers
 
-## Overview
-This project implements a **peer-to-peer (P2P) file sharing system** with **redundant trackers**.  
-Clients connect to a tracker for coordination (user login, group management, metadata exchange) but also act as mini-servers for other peers.  
-Multiple trackers run in parallel and synchronize their states to ensure fault tolerance.
+Course: Advanced Operating System
+
+Roll No: 2025201005
+
+
+## Architecture overview
+
+Components
+- Tracker: accepts client connections, manages users/groups/files, and replicates state-changing events to a peer tracker using a persistent sync socket.
+- Client: interactive CLI; registers with a tracker, issues commands (login, create_group, upload/download), and hosts a peer-server to serve file pieces.
+- Tracker sync: a separate thread that connects to the peer tracker and applies incoming state-change messages.
+
+Data model (in-memory)
+- Users: `user_and_password` (username -> password)
+- Active sessions / peer contact: `user_ports` (username -> ip:port or peer id)
+- Client->username mapping: `client_user` (client socket fd -> username)
+- Groups: `group_members`, `group_leader`, `group_requests`
+- Files: `group_files` (group -> vector<FileInfo>), `all_files` (filepath -> FileInfo)
+
+Concurrency
+- Trackers use mutexes around user and file maps (`user_mutex`, `group_members_mutex`, `files_mutex`).
+- Each incoming client connection is handled in its own thread (`thread-per-client`).
+- Clients use worker threads to fetch file pieces in parallel; `DownloadTask` owns worker threads and an atomic cancellation flag.
 
 ---
 
-##  Client Side (client.cpp)
+## Protocols & formats (derived from code)
 
-### `connect_to_tracker()`
-- Reads a list of tracker IPs/ports (from `tracker_info.txt`).
-- Iterates through them until one connection succeeds.
-- Returns the connected socket descriptor.
-- If none are available, exits.
+Tracker-client messages (examples)
+- create_user <username> <password>
+- login <username> <password> <peer-ip:peer-port>
+- logout
+- create_group <group_id>
+- join_group <group_id>
+- upload_file <group_id> <file_path>
+- download_file <group_id> <file_name> <destination_path>
+- list_files <group_id>
+- stop_share <group_id> <file_name>
 
- **Why this approach?**  
-This ensures **failover capability**. Even if one tracker is down, clients can still join the network through another tracker.
+Tracker responses
+- Most handlers return short plain-text responses. Download_file returns a multi-line response starting with `FOUND <filesize> <sha1_full> <num_pieces> <filepath>` followed by a line with space-separated piece SHA1 hashes and a `PEERS` line listing peers.
 
----
+Client-peer interaction
+- Clients open a peer-server that supports a minimal `get_piece <filepath> <piece_idx>` request. Responses are:
+	- `DATA <len>\n` followed by raw bytes, or
+	- `ERROR <reason>` for failures.
 
-### `client_server(peer_port)`
-- Creates a local listening socket bound to the given `peer_port`.
-- Accepts connections from other peers (simulating file sharing).
-- Responds with dummy file data (in a real system, this would be file chunks).
+Chunking and hashing
+- Piece size: 512 KiB (512*1024 bytes).
+- Per-piece verification: each piece is SHA1 hashed using OpenSSL APIs; the full-file SHA1 is computed and checked after assembly.
 
- **Why this approach?**  
-This turns every client into both a **server** and a **client**, enabling true **peer-to-peer** interaction.
-
----
-
-### `main()`
-- Takes input arguments:
-  - `<ip:port>` → Peer info (for client server).
-  - `tracker_info.txt` → List of trackers.
-- Starts a background **peer server thread**.
-- Reads available trackers and connects using `connect_to_tracker()`.
-- Runs a **command loop** where users can:
-  - `login <user> <pass>`
-  - `create_user`, `create_group`, `logout`, etc.
-- If the tracker disconnects, it **attempts reconnection** to another tracker automatically.
-
- **Why this approach?**  
-Clients remain **self-sufficient**, capable of recovery without manual restart.
+Tracker-tracker sync
+- Trackers maintain one persistent TCP connection to a peer. When a tracker handles a client command that mutates state it calls `send_sync_message(command)` (subject to small exclusions in the main loop). The peer's sync thread receives the command string and invokes the same handler locally while marking `is_sync_message` to avoid re-forwarding.
 
 ---
 
-##  Tracker Side (tracker.cpp)
+## How the client download works (key details)
 
-### Client Handling
-- Listens for client connections.
-- Spawns a dedicated thread (`client_handle`) for each client.
-- Parses incoming commands:
-  - `create_user`, `login`, `logout`
-  - `create_group`, `join_group`, `leave_group`
-  - `upload_file`, `download_file`, etc.
-- Uses shared maps (from `user.cpp`) to manage:
-  - Users & passwords
-  - User login states
-  - Groups & members
-  - File metadata
-
- **Why this approach?**  
-Thread-per-client allows **parallel handling**. Shared maps ensure a **single source of truth**.
+- `download_file` asks the tracker for file metadata (size, full SHA1, piece hashes, peers).
+- A `DownloadTask` is created with per-piece state and a queue of pending piece indices.
+- Multiple worker threads are spawned (bounded by peers*2 and capped at 8). Each worker repeatedly picks a pending piece, connects to one of the peers, requests `get_piece`, receives `DATA`, verifies piece SHA1 and writes it to the correct offset in a `.part` file using `pwrite`.
+- On completion the `.part` file is verified against the file-level SHA1 and, if correct, renamed to the final filename and the tracker is notified (`upload_file` to inform the tracker this peer now has the file).
+- If the user issues `logout`, `stop_all_downloads()` sets a cancellation flag and joins worker threads; stopped filenames are printed to console.
 
 ---
 
-##  Tracker Synchronization (tracker_sync.cpp / tracker_sync.h)
+## Build & run (concrete)
 
-### `start_sync_thread(peer_ip, peer_port)`
-- Connects to another tracker.
-- Listens for **synchronization messages**.
-- On receiving a message, applies the same operation locally (unless it was already processed).
+1. Build
 
-### `send_sync_message(msg)`
-- When a tracker processes a **new client command**, it forwards it to all peer trackers.
-- Sync messages are tagged to prevent loops.
-
- **Why this approach?**  
-This achieves **event-driven replication**.  
-Instead of full snapshot copying (which is costly), only **state-changing events** are shared, keeping trackers consistent with minimal overhead.
-
----
-
-##  User Management (user.cpp)
-
-- Functions:
-  - `create_user`
-  - `login`
-  - `logout`
-  - `create_group`
-  - `join_group`
-  - etc.
-- Metadata stored in:
-  - `unordered_map<string, string>` → user → password
-  - `unordered_map<string, int>` → user → port
-  - `unordered_map<string, vector<string>>` → group → members
-- Mutexes ensure **thread safety**.
-
- **Why this approach?**  
-Maps provide **fast O(1) lookups**, suitable for frequent queries.  
-Mutexes prevent race conditions when multiple clients modify shared state.
-
----
-
-##  Metadata Organization
-
-- **Users** → `user_and_password`
-- **Active sessions** → `user_ports`
-- **Groups** → `group_members`
-- **Pending requests** → `join_requests`
-- **Files** → (planned extension) mapping of group → file → list of peers.
-
- **Why this approach?**  
-Organizing data into **logical maps** makes it easy to:
-- Look up users quickly.
-- Add/remove group members efficiently.
-- Extend to file-sharing without major redesign.
-
----
-
-##  Build Setup
-
-### Client
-```bash
-cd Client
-make
-./client <ip:port> ../tracker_info.txt
-```
-
-### Tracker
 ```bash
 cd Tracker
 make
-./tracker ../tracker_info.txt <tracker-number>
+cd ../Client
+make
 ```
 
+2. Start two trackers (example)
+
+Open two terminals and run, using the lines in `tracker_info.txt` and tracker numbers 1 and 2:
+
+```bash
+cd Tracker
+./tracker ../tracker_info.txt 1
+./tracker ../tracker_info.txt 2
+```
+
+3. Start a client
+
+```bash
+cd Client
+./client 127.0.0.1:4001 ../tracker_info.txt
+```
+
+4. Common test flow (manual)
+
+- On client A: `create_user u1 p1` -> `login u1 p1` (the client appends its peer ip:port automatically to the login token).
+- On client A: `create_group g1` -> `upload_file g1 /path/to/file`
+- On client B (connected to the other tracker): `download_file g1 filename /tmp` -> client B should obtain peers from tracker and fetch pieces.
+- On client A: start a download then `logout` -> the client should cancel downloads and print `Stopped download: <filename>`.
+
+
 ---
 
-##  Design & Justification
+## Where to look in the code
 
-1. **Synchronization**  
-   - **Event-driven updates** (send only state-changing commands).
-
-2. **Handling Connections**  
-   - Thread-per-client model for simplicity.
-   - Ensures each client gets responsive handling.
-   - Future improvement: Thread pool to scale better.
-
-3. **Metadata Storage**  
-   - Used **unordered_maps** for O(1) lookups.
-   - Mutexes ensure thread-safe concurrent access.
-   - Easy to extend with new features (file metadata, permissions, etc.).
-
-4. **Fault Tolerance**  
-   - Clients cycle through available trackers.
-   - Trackers replicate state to each other.
-   - Ensures no single point of failure.
+- `Client/client.cpp` — CLI, `DownloadTask` semantics, `client_server()` and peer `get_piece` handler.
+- `Client/net_utils.h` — `send_all` / `recv_all` / `recv_line` helpers used throughout.
+- `Tracker/tracker.cpp` — accept loop, `client_handle()` dispatch, and when `send_sync_message()` is invoked.
+- `Tracker/tracker_sync.cpp` — persistent peer connection, receiving/dispatching sync messages.
+- `Tracker/user.cpp` & `Tracker/files.cpp` — user/group/file handlers and shared in-memory maps.
 
 ---
-
-## Conclusion
-This system demonstrates a **fault-tolerant P2P file sharing architecture** with:
-- **Clients** that can act as peers and servers.
-- **Trackers** that synchronize via event-driven updates.
-- **Thread-safe metadata management**.
-- **Resilience** against tracker failures.
-
-The chosen design strikes a balance between **simplicity, performance, and reliability**, making it a strong foundation for a distributed file-sharing platform.
