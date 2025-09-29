@@ -125,6 +125,7 @@ string upload_file(const vector<string> &tokens, int client_fd)
             m += " SHARED_BY";
             for (auto &s : ff.shared_by)
                 m += " " + s;
+            cout << "File already shared; added peer " << peerid << " for " << filename << endl;
             return "File already shared; added you as a peer for: " + filename;
         }
     }
@@ -147,6 +148,7 @@ string upload_file(const vector<string> &tokens, int client_fd)
     m += " SHARED_BY";
     for (auto &s : f.shared_by)
         m += " " + s;
+    cout << "File uploaded: " << filename << " by peer " << peerid << endl;
     return "File uploaded: " + filename;
 }
 
@@ -271,6 +273,7 @@ string stop_share(const vector<string> &tokens, int client_fd)
                           vec.end());
                 string path_key = it->first;
                 all_files.erase(it);
+                cout << "Stopped sharing and removed file " << filename << " from group " << group_id << endl;
             }
             else
             {
@@ -280,6 +283,7 @@ string stop_share(const vector<string> &tokens, int client_fd)
                     if (gf.filename == filename)
                         gf.shared_by = f.shared_by;
                 }
+                cout << "Removed peer " << peerid << " from file " << filename << " in group " << group_id << endl;
             }
             return "Stopped sharing file: " + filename;
         }

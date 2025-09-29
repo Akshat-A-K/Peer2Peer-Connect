@@ -18,6 +18,9 @@
 #include <iomanip>
 using namespace std;
 
+// ...existing code...
+
+// Structure to hold download task information
 struct DownloadTask
 {
     string group_id;
@@ -31,12 +34,15 @@ struct DownloadTask
     int num_pieces;
     mutex m;
     bool completed = false;
-    atomic<bool> cancel{false};
+    atomic<bool> cancelled{false};
+    vector<thread> workers;
+    atomic<bool> joined{false};
 };
 
-map<string, shared_ptr<DownloadTask>> active_downloads;
-mutex active_downloads_mutex;
+map<string, shared_ptr<DownloadTask>> active_downloads; // group id + filename -> task
+mutex active_downloads_mutex;                           // protects active_downloads
 
+// Get the size of a file
 long get_filesize(const string &filepath)
 {
     struct stat stat_buf;
@@ -257,7 +263,7 @@ void download_file(int tracker_fd, const string &args)
     string group, filename, dest_path;
     if (!(iss >> group >> filename >> dest_path))
     {
-        cout << "Usage: download_file <group_id> <file_name> <destination_path>\n";
+        cout << "Usage: download_file <group_id> <file_name> <destination_path>" << endl;
         return;
     }
 
@@ -271,7 +277,7 @@ void download_file(int tracker_fd, const string &args)
         int n = read(tracker_fd, buf, sizeof(buf));
         if (n <= 0)
         {
-            cout << "Tracker read error\n";
+            cout << "Tracker read error" << endl;
             return;
         }
         resp.append(buf, n);
@@ -289,7 +295,7 @@ void download_file(int tracker_fd, const string &args)
 
     if (resp.empty())
     {
-        cout << "Tracker read error - response is empty" << endl;
+        cout << "Tracker response empty" << endl;
         return;
     }
 
@@ -298,7 +304,7 @@ void download_file(int tracker_fd, const string &args)
 
     if (!getline(riss, line))
     {
-        cout << "Unexpected tracker response (empty)\n";
+        cout << "Unexpected tracker response (empty)" << endl;
         return;
     }
 
@@ -313,18 +319,18 @@ void download_file(int tracker_fd, const string &args)
     string filepath_on_peer;
     if (!(h >> token >> filesize >> sha_full >> num_pieces >> filepath_on_peer))
     {
-        cout << "Malformed tracker header: " << line << "\n";
+        cout << "Malformed tracker header: " << line << endl;
         return;
     }
     if (token != "FOUND")
     {
-        cout << "Unexpected tracker token: " << token << "\n";
+        cout << "File not found on tracker: " << token << endl;
         return;
     }
 
     if (!getline(riss, line))
     {
-        cout << "Malformed tracker response: missing piece hashes\n";
+        cout << "Malformed tracker response: missing piece hashes" << endl;
         return;
     }
     if (!line.empty() && line.back() == '\r')
@@ -340,7 +346,7 @@ void download_file(int tracker_fd, const string &args)
 
     if (!getline(riss, line))
     {
-        cout << "Malformed tracker response: missing peers\n";
+        cout << "Malformed tracker response: missing peers" << endl;
         return;
     }
     if (!line.empty() && line.back() == '\r')
@@ -351,7 +357,6 @@ void download_file(int tracker_fd, const string &args)
         string first;
         if (!(ps >> first))
         { /* no peers */
-
         }
         else
         {
@@ -373,7 +378,7 @@ void download_file(int tracker_fd, const string &args)
 
     if (peers.empty())
     {
-        cout << "No peers available\n";
+        cout << "No peers available" << endl;
         return;
     }
 
@@ -397,7 +402,7 @@ void download_file(int tracker_fd, const string &args)
     int fd = open(partname.c_str(), O_CREAT | O_RDWR, 0666);
     if (fd < 0)
     {
-        cout << "Failed to create part file at " << partname << "\n";
+        cout << "Failed to create part file at " << partname << endl;
         return;
     }
 
@@ -411,14 +416,8 @@ void download_file(int tracker_fd, const string &args)
     {
         while (true)
         {
-
-            if (task->cancel.load())
-            {
-                close(fd);
-                remove(partname.c_str());
-                return;
-            }
-
+            if (task->cancelled)
+                break;
             int piece = -1;
             {
                 lock_guard<mutex> lg(queue_mtx);
@@ -428,17 +427,10 @@ void download_file(int tracker_fd, const string &args)
                 pending_pieces.pop();
             }
 
-            if (task->cancel.load())
-            {
-                close(fd);
-                remove(partname.c_str());
-                return;
-            }
-
             int retries = 0;
             bool piece_done = false;
 
-            while (!piece_done && retries < 5 && !task->cancel.load())
+            while (!piece_done && retries < 5)
             {
                 for (size_t pi = 0; pi < peers.size() && !piece_done; ++pi)
                 {
@@ -505,9 +497,10 @@ void download_file(int tracker_fd, const string &args)
                     {
                         lock_guard<mutex> lg(queue_mtx);
                         double progress = (double)(piece + 1) / num_pieces * 100.0;
+                        char c = '%';
                         cout << "\rThread " << tid
                              << " downloading... " << fixed << setprecision(2)
-                             << progress << "% completed" << flush;
+                             << progress << c << "c completed" << flush;
                     }
                 }
 
@@ -516,6 +509,8 @@ void download_file(int tracker_fd, const string &args)
                     retries++;
                     this_thread::sleep_for(chrono::milliseconds(500));
                 }
+                if (task->cancelled)
+                    break;
             }
 
             if (!piece_done)
@@ -527,25 +522,20 @@ void download_file(int tracker_fd, const string &args)
     };
 
     int max_threads = min((int)peers.size() * 2, 8);
-    vector<thread> pool;
+    // store worker threads inside the task so they can be joined later
     for (int i = 0; i < max_threads; i++)
-        pool.emplace_back(worker, i);
-    for (auto &th : pool)
+        task->workers.emplace_back(worker, i);
+    for (auto &th : task->workers)
         if (th.joinable())
             th.join();
+    task->joined = true;
 
     close(fd);
 
-    if (task->cancel.load())
-    {
-        remove(partname.c_str());
-        return;
-    }
-    // Compute final SHA
     int fd2 = open(partname.c_str(), O_RDONLY);
     if (fd2 < 0)
     {
-        cout << "Open assembled file failed\n";
+        cout << "Open assembled file failed" << endl;
         return;
     }
     SHA_CTX ctx;
@@ -566,12 +556,17 @@ void download_file(int tracker_fd, const string &args)
     {
         string finalname = dest_path + "/" + filename;
         rename(partname.c_str(), finalname.c_str());
-        cout << "\nDownload complete: " << finalname << "\n";
+        cout << "Download complete: " << finalname << endl;
         task->completed = true;
+        {
+            lock_guard<mutex> lg(active_downloads_mutex);
+            active_downloads.erase(task->group_id + "|" + task->filename);
+        }
+        upload_file(tracker_fd, task->group_id, dest_path + "/" + task->filename);
     }
     else
     {
-        cout << "\nsFinal SHA mismatch. Download incomplete or corrupted.\n";
+        cout << "Final SHA mismatch. Download incomplete or corrupted." << endl;
     }
 }
 
@@ -580,7 +575,7 @@ void show_downloads()
     lock_guard<mutex> a(active_downloads_mutex);
     if (active_downloads.empty())
     {
-        cout << "No downloads\n";
+        cout << "No downloads" << endl;
         return;
     }
     for (auto &kv : active_downloads)
@@ -591,10 +586,52 @@ void show_downloads()
         int percent = (total > 0) ? (done * 100 / total) : 0;
         cout << task->filename << " (" << task->group_id << ") ";
         if (task->completed)
-            cout << "Completed 100% [" << total << "/" << total << "]\n";
+            cout << "Completed 100% [" << total << "/" << total << "]" << endl;
         else
-            cout << percent << "% [" << done << "/" << total << "]\n";
+            cout << percent << "% [" << done << "/" << total << "]" << endl;
     }
+}
+
+void stop_all_downloads()
+{
+    // signal cancellation first
+    {
+        lock_guard<mutex> a(active_downloads_mutex);
+        for (auto &kv : active_downloads)
+        {
+            kv.second->cancelled = true;
+        }
+    }
+
+    // join worker threads and report stopped downloads
+    vector<string> stopped_files;
+    {
+        lock_guard<mutex> a(active_downloads_mutex);
+        for (auto &kv : active_downloads)
+        {
+            auto &task = kv.second;
+            if (task->completed)
+                continue;
+
+            // join workers if not already joined
+            if (!task->joined)
+            {
+                for (auto &th : task->workers)
+                {
+                    if (th.joinable())
+                        th.join();
+                }
+                task->joined = true;
+            }
+
+            // if still not completed, consider it stopped
+            if (!task->completed)
+                stopped_files.push_back(task->filename);
+        }
+    }
+
+    for (auto &f : stopped_files)
+        cout << "Stopped download: " << f << endl;
 }
 
 void list_files(int tracker_fd, const string &group_id)
@@ -613,35 +650,6 @@ void list_files(int tracker_fd, const string &group_id)
 
 void stop_share(int tracker_fd, const string &group_id, const string &filename)
 {
-    string key = group_id + "|" + filename;
-    shared_ptr<DownloadTask> task = nullptr;
-
-    {
-        lock_guard<mutex> lg(active_downloads_mutex);
-        if (active_downloads.count(key))
-        {
-            task = active_downloads[key];
-            task->cancel.store(true);
-            cout << "Download cancelled: " << filename << endl;
-        }
-        else
-        {
-            cout << "No active download found for: " << filename << endl;
-        }
-    }
-
-    // Wait a short time for threads to notice cancel flag
-    if (task)
-    {
-        while (!task->completed && task->pieces_done.load() < task->num_pieces)
-        {
-            this_thread::sleep_for(chrono::milliseconds(100));
-        }
-        // Now safe to remove
-        lock_guard<mutex> lg(active_downloads_mutex);
-        active_downloads.erase(key);
-    }
-
     // Notify tracker
     string msg = "stop_share " + group_id + " " + filename + "\n";
     send(tracker_fd, msg.c_str(), msg.size(), 0);
@@ -752,6 +760,15 @@ int main(int argc, char *argv[])
             string logout_msg = "logout\n";
             send(tracker_fd, logout_msg.c_str(), logout_msg.size(), 0);
             break;
+        }
+        if (command == "logout")
+        {
+            // stop active downloads before logging out
+            stop_all_downloads();
+            string logout_msg = "logout\n";
+            send(tracker_fd, logout_msg.c_str(), logout_msg.size(), 0);
+            cout << "Logged out and stopped active downloads" << endl;
+            continue;
         }
         if (command.rfind("login", 0) == 0)
         {

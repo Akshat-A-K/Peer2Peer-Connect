@@ -2,6 +2,7 @@
 #include "files.h"
 #include <algorithm>
 #include <arpa/inet.h>
+#include <iostream>
 using namespace std;
 
 unordered_map<string, string> user_and_password;
@@ -36,6 +37,7 @@ string create_user(const vector<string> &tokens)
         {
             user_and_password[username] = password;
             response = "User created successfully";
+            cout << "User created: " << username << endl;
         }
     }
     return response;
@@ -79,6 +81,7 @@ string login(const vector<string> &tokens, int client_fd)
         }
         user_ports[username] = peer_port;
         response = "Login successful";
+        cout << "User logged in: " << username << " peer=" << peer_port << endl;
     }
     return response;
 }
@@ -103,6 +106,7 @@ string logout(const vector<string> &tokens, int client_fd)
             client_user.erase(client_fd);
             user_ports.erase(username);
             response = "Logout successful (" + username + ")";
+            cout << "User logged out: " << username << endl;
         }
     }
     return response;
@@ -135,6 +139,7 @@ string create_group(const vector<string> &tokens, int client_fd)
             group_members[group_id].push_back(username);
             group_files[group_id] = {};
             response = "Group created successfully with ID: " + group_id;
+            cout << "Group created: " << group_id << " by " << username << endl;
         }
     }
     return response;
@@ -175,6 +180,7 @@ string join_group(const vector<string> &tokens, int client_fd)
             {
                 group_requests[group_id].push_back(username);
                 response = "Join request sent to group leader";
+                cout << "Join request: user=" << username << " group=" << group_id << endl;
             }
         }
     }
@@ -251,6 +257,7 @@ string accept_request(const vector<string> &tokens, int client_fd)
                 group_members[group_id].push_back(username);
                 requests.erase(it);
                 response = "User " + username + " added to group " + group_id;
+                cout << "Request accepted: user=" << username << " group=" << group_id << endl;
             }
         }
     }
@@ -287,12 +294,14 @@ string leave_group(const vector<string> &tokens, int client_fd)
                     group_members.erase(group_id);
                     group_requests.erase(group_id);
                     response = "You have left and deleted the group " + group_id + " as you were the only member";
+                    cout << "Group deleted: " << group_id << " by " << username << endl;
                 }
                 else
                 {
                     group_leader[group_id] = group_members[group_id][1];
                     group_members[group_id].erase(group_members[group_id].begin());
                     response = "You have left the group " + group_id + ". Leadership transferred to " + group_leader[group_id];
+                    cout << "Leadership transferred for group " << group_id << " to " << group_leader[group_id] << endl;
                 }
             }
             else if (find(group_members[group_id].begin(), group_members[group_id].end(), username) == group_members[group_id].end())
@@ -304,6 +313,7 @@ string leave_group(const vector<string> &tokens, int client_fd)
                 auto it = find(group_members[group_id].begin(), group_members[group_id].end(), username);
                 group_members[group_id].erase(it);
                 response = "You have left the group " + group_id;
+                cout << "User left group: " << username << " group=" << group_id << endl;
             }
         }
     }

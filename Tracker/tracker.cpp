@@ -30,6 +30,13 @@ void client_handle(int client)
         if (bytes > 0)
         {
             string command(buffer, bytes);
+            // Simple log: show first token of received command
+            {
+                istringstream _iss(command);
+                string _first;
+                if (_iss >> _first)
+                    cout << "Received command: " << _first << endl;
+            }
             string response = "";
 
             while (!command.empty() && (command.back() == '\n' || command.back() == '\r'))
@@ -191,6 +198,7 @@ int main(int argc, char *argv[])
     sleep(1);
 
     cout << "Tracker " << tracker_no << " running at " << ip << ":" << port << endl;
+    cout << "Syncing with peer tracker at " << peer_ip << ":" << peer_port << endl;
 
     thread console_thread([]()
                           {
@@ -269,6 +277,9 @@ int main(int argc, char *argv[])
             perror("Accept failed");
             continue;
         }
+        char cli_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client.sin_addr, cli_ip, INET_ADDRSTRLEN);
+        cout << "Accepted connection from " << cli_ip << ":" << ntohs(client.sin_port) << " fd=" << client_fd << endl;
         thread(client_handle, client_fd).detach();
     }
     close(server);
