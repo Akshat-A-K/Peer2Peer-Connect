@@ -8,7 +8,7 @@
 #include <mutex>
 using namespace std;
 
-struct FileInfo 
+struct FileInfo
 {
     string filename;
     string filepath;
@@ -28,7 +28,7 @@ struct FileInfo
     }
 };
 
-extern unordered_map<string, vector<FileInfo>> group_files; 
+extern unordered_map<string, vector<FileInfo>> group_files;
 extern unordered_map<string, FileInfo> all_files;
 extern mutex files_mutex;
 

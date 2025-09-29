@@ -12,14 +12,14 @@
 #include <algorithm>
 using namespace std;
 
-int sync_socket=-1;
-bool is_sync_message=false;
+int sync_socket = -1;
+bool is_sync_message = false;
 mutex sync_mutex;
 
-void start_sync_thread(string peer_ip, int peer_port) 
+void start_sync_thread(string peer_ip, int peer_port)
 {
-    thread([peer_ip, peer_port]() 
-    {
+    thread([peer_ip, peer_port]()
+           {
         while(1) 
         {
             int s;
@@ -179,16 +179,16 @@ void start_sync_thread(string peer_ip, int peer_port)
             close(s);
             sync_socket=-1;
             sleep(2);
-        }
-    }).detach();
+        } })
+        .detach();
 }
 
-void send_sync_message(const string &msg) 
+void send_sync_message(const string &msg)
 {
     lock_guard<mutex> lock(sync_mutex);
-    if (sync_socket>0) 
+    if (sync_socket > 0)
     {
-        string m=msg+"\n";
+        string m = msg + "\n";
         send(sync_socket, m.c_str(), m.size(), 0);
     }
 }
