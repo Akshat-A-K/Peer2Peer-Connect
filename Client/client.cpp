@@ -610,12 +610,8 @@ void download_file(int tracker_fd, const string &args)
     {
         string finalname = dest_path + "/" + filename;
         rename(partname.c_str(), finalname.c_str());
-        cout << "Download complete: " << finalname << endl;
+        cout << endl << "Download complete: " << finalname << endl;
         task->completed = true;
-        {
-            lock_guard<mutex> lg(active_downloads_mutex);
-            active_downloads.erase(task->group_id + "|" + task->filename);
-        }
         upload_file(tracker_fd, task->group_id, dest_path + "/" + task->filename);
     }
     else
@@ -647,18 +643,18 @@ void show_downloads()
                         completed++;
                 }
             }
-            cout << task->filename << " (" << task->group_id << ") ";
+            cout << "File: " << task->filename << " Group: " << task->group_id << " ";
             if (task->completed)
             {
-                cout << "C 100% [" << completed << "/" << total << "]" << endl;
+                cout << "C 100%" << endl;
             }
             else
             {
                 // Show 'D' if actively downloading, else show progress percent
                 if (downloading > 0)
-                    cout << "D " << fixed << setprecision(2) << ((double)completed / total * 100.0) << "% [C=" << completed << " D=" << downloading << "/" << total << "]" << endl;
+                    cout << "D " << fixed << setprecision(2) << ((double)completed / total * 100.0) << "%" << endl;
                 else
-                    cout << ((total > 0) ? (completed * 100 / total) : 0) << "% [C=" << completed << " D=" << downloading << "/" << total << "]" << endl;
+                    cout << ((total > 0) ? (completed * 100 / total) : 0) << "%" << endl;
             }
         }
 }
@@ -878,8 +874,12 @@ int main(int argc, char *argv[])
                 cout << "Usage: download_file <group_id> <file_name> <destination_path>" << endl;
                 continue;
             }
-            string filename = command.substr(14);
-            download_file(tracker_fd, filename);
+            string args = command.substr(14);
+            thread([tracker_fd, args]()
+            {
+                download_file(tracker_fd, args);
+            }).detach();
+            cout << "Download started in background: " << args << endl;
             continue;
         }
         else if (command.rfind("list_files", 0) == 0)
