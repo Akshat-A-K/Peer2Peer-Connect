@@ -1,10 +1,10 @@
-CXX = g++
-CXXFLAGS = -std=c++17 -pthread -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations -g
-LDFLAGS = -lcrypto
+CXX=g++
+CXXFLAGS=-std=c++17 -pthread -Wall -Wextra -Wno-unused-parameter -Wno-deprecated-declarations -g
+LDFLAGS=-lcrypto
 
-SRCS = client.cpp
-OBJS = $(SRCS:.cpp=.o)
-TARGET = client
+SRCS=client.cpp
+OBJS=$(SRCS:.cpp=.o)
+TARGET=client
 
 all: $(TARGET)
 

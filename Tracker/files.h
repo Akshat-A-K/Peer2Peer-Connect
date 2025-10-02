@@ -20,11 +20,7 @@ struct FileInfo
 
     bool operator==(const FileInfo &other) const
     {
-        return filename == other.filename &&
-               filepath == other.filepath &&
-               group_id == other.group_id &&
-               filesize == other.filesize &&
-               sha1_full == other.sha1_full;
+        return filename==other.filename && filepath==other.filepath && group_id==other.group_id && filesize==other.filesize && sha1_full==other.sha1_full;
     }
 };
 

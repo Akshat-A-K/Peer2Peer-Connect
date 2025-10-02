@@ -1,16 +1,16 @@
 # Compiler and flags
-CXX = g++
-CXXFLAGS = -std=c++17 -pthread -Wall -Wextra -Wno-unused-parameter -g
-LDFLAGS = -lcrypto
+CXX=g++
+CXXFLAGS=-std=c++17 -pthread -Wall -Wextra -Wno-unused-parameter -g
+LDFLAGS=-lcrypto
 
 # Source files (all .cpp in the directory)
-SRCS = tracker.cpp files.cpp user.cpp tracker_sync.cpp
+SRCS=tracker.cpp files.cpp user.cpp tracker_sync.cpp
 
 # Object files
-OBJS = $(SRCS:.cpp=.o)
+OBJS=$(SRCS:.cpp=.o)
 
 # Target executable
-TARGET = tracker
+TARGET=tracker
 
 # Default rule
 all: $(TARGET)
