@@ -12,8 +12,8 @@
 #include <algorithm>
 using namespace std;
 
-int sync_socket=-1;
-bool is_sync_message=false;
+int sync_socket = -1;
+bool is_sync_message = false;
 mutex sync_mutex;
 
 void start_sync_thread(string peer_ip, int peer_port)
@@ -113,7 +113,13 @@ void start_sync_thread(string peer_ip, int peer_port)
                             }
                         }
                     }
-                    else if(tokens[0]=="login"){if(tokens.size()>=4)login(tokens,-1);}else if(tokens[0]=="logout")logout(tokens,-1);
+                    else if(tokens[0]=="login"){if(tokens.size()>=4)login(tokens,-1);}else if(tokens[0]=="logout"){
+                        if(tokens.size()>=2){ // logout <username>
+                            logout_by_username(tokens[1]);
+                        } else {
+                            logout(tokens,-1);
+                        }
+                    }
                     else if(tokens[0]=="list_groups"||tokens[0]=="list_requests"){ }
                 }
                 is_sync_message=false;
@@ -128,9 +134,9 @@ void start_sync_thread(string peer_ip, int peer_port)
 void send_sync_message(const string &msg)
 {
     lock_guard<mutex> lock(sync_mutex);
-    if(sync_socket>0)
+    if (sync_socket > 0)
     {
-        string m=msg+"\n";
+        string m = msg + "\n";
         send(sync_socket, m.c_str(), m.size(), 0);
     }
 }

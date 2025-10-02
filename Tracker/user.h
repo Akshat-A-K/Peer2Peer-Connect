@@ -21,6 +21,7 @@ extern mutex group_members_mutex;
 string create_user(const vector<string> &tokens);
 string login(const vector<string> &tokens, int client_fd);
 string logout(const vector<string> &tokens, int client_fd);
+string logout_by_username(const string &username);
 string create_group(const vector<string> &tokens, int client_fd);
 string join_group(const vector<string> &tokens, int client_fd);
 string leave_group(const vector<string> &tokens, int client_fd);

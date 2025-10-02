@@ -16,7 +16,7 @@
 #include "files.h"
 using namespace std;
 
-bool running=true;
+bool running = true;
 mutex run_mutex;
 
 void client_handle(int client)
@@ -34,10 +34,10 @@ void client_handle(int client)
             {
                 istringstream _iss(command);
                 string _first;
-                    if (_iss >> _first)
-                        cout<<"Received command: "<<_first<<endl;
+                if (_iss >> _first)
+                    cout << "Received command: " << _first << endl;
             }
-            string response="";
+            string response = "";
 
             while (!command.empty() && (command.back() == '\n' || command.back() == '\r'))
                 command.pop_back();
@@ -112,13 +112,39 @@ void client_handle(int client)
             }
             if (!is_sync_message)
             {
-                if (tokens[0] != "list_groups" && tokens[0] != "list_requests" && tokens[0] != "upload_file" && tokens[0] != "stop_share")
+                if (tokens[0] != "list_groups" && tokens[0] != "list_requests" && tokens[0] != "list_files")
                     send_sync_message(command);
             }
             send(client, response.c_str(), response.size(), 0);
         }
         else
         {
+            // client disconnected unexpectedly: perform logout for this client_fd
+            try
+            {
+                string uname;
+                {
+                    lock_guard<mutex> ul(user_mutex);
+                    if (client_user.find(client) != client_user.end())
+                        uname = client_user[client];
+                }
+                if (!uname.empty())
+                {
+                    vector<string> ltok;
+                    ltok.push_back("logout");
+                    // call logout to remove client mapping
+                    string lresp = logout(ltok, client);
+                    if (!lresp.empty())
+                        cout << lresp << endl;
+                    // forward logout with username to peer trackers so state is consistent
+                    if (!is_sync_message)
+                        send_sync_message(string("logout ") + uname);
+                }
+            }
+            catch (...)
+            {
+                // best-effort: ignore any exception
+            }
             close(client);
             return;
         }
@@ -133,10 +159,16 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    char *filename=argv[1];
-    int tracker_no=0;
-    try{tracker_no=stoi(argv[2]);}
-    catch(exception &e){cout<<e.what()<<endl;}
+    char *filename = argv[1];
+    int tracker_no = 0;
+    try
+    {
+        tracker_no = stoi(argv[2]);
+    }
+    catch (exception &e)
+    {
+        cout << e.what() << endl;
+    }
 
     int fd = open(filename, O_RDONLY);
     if (fd < 0)
@@ -145,8 +177,8 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    char file_buffer[1024]={0};
-    int bytes=read(fd,file_buffer,1024);
+    char file_buffer[1024] = {0};
+    int bytes = read(fd, file_buffer, 1024);
     close(fd);
     if (bytes <= 0)
     {
@@ -154,7 +186,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    file_buffer[bytes]='\0';
+    file_buffer[bytes] = '\0';
 
     vector<string> lines;
     string line;
@@ -173,26 +205,46 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    string ip;int port;{istringstream ls(lines[tracker_no-1]);ls>>ip>>port;}
+    string ip;
+    int port;
+    {
+        istringstream ls(lines[tracker_no - 1]);
+        ls >> ip >> port;
+    }
 
-    string peer_ip;int peer_port;{int peer_no=(tracker_no==1)?2:1;istringstream ls(lines[peer_no-1]);ls>>peer_ip>>peer_port;}
+    string peer_ip;
+    int peer_port;
+    {
+        int peer_no = (tracker_no == 1) ? 2 : 1;
+        istringstream ls(lines[peer_no - 1]);
+        ls >> peer_ip >> peer_port;
+    }
 
     start_sync_thread(peer_ip, peer_port);
     sleep(1);
 
-    cout<<"Tracker "<<tracker_no<<" running at "<<ip<<":"<<port<<endl;
-    cout<<"Syncing with peer tracker at "<<peer_ip<<":"<<peer_port<<endl;
+    cout << "Tracker " << tracker_no << " running at " << ip << ":" << port << endl;
+    cout << "Syncing with peer tracker at " << peer_ip << ":" << peer_port << endl;
 
-    thread console_thread([](){string cmd;while(1){if(!getline(cin,cmd))break;if(cmd=="exit"||cmd=="quit"){lock_guard<mutex> lock(run_mutex);running=false;shutdown(sync_socket,SHUT_RDWR);break;}}});
+    thread console_thread([]()
+                          {string cmd;while(1){if(!getline(cin,cmd))break;if(cmd=="exit"||cmd=="quit"){lock_guard<mutex> lock(run_mutex);running=false;shutdown(sync_socket,SHUT_RDWR);break;}} });
     console_thread.detach();
 
     int server;
     struct sockaddr_in server_address;
     int opt = 1;
 
-    if ((server=socket(AF_INET,SOCK_STREAM,0))<0){perror("Socket creation failed");exit(EXIT_FAILURE);}
+    if ((server = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+    {
+        perror("Socket creation failed");
+        exit(EXIT_FAILURE);
+    }
 
-    if (setsockopt(server,SOL_SOCKET,SO_REUSEADDR,&opt,sizeof(opt))){perror("Set socket options failed");exit(EXIT_FAILURE);}
+    if (setsockopt(server, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)))
+    {
+        perror("Set socket options failed");
+        exit(EXIT_FAILURE);
+    }
 
 #ifdef SO_REUSEPORT
     if (setsockopt(server, SOL_SOCKET, SO_REUSEPORT, &opt, sizeof(opt)) < 0)
@@ -202,7 +254,13 @@ int main(int argc, char *argv[])
     }
 #endif
 
-    server_address.sin_family=AF_INET; if (inet_pton(AF_INET,ip.c_str(),&server_address.sin_addr)<=0){perror("Invalid tracker bind IP");exit(EXIT_FAILURE);} server_address.sin_port=htons(port);
+    server_address.sin_family = AF_INET;
+    if (inet_pton(AF_INET, ip.c_str(), &server_address.sin_addr) <= 0)
+    {
+        perror("Invalid tracker bind IP");
+        exit(EXIT_FAILURE);
+    }
+    server_address.sin_port = htons(port);
 
     if (bind(server, (struct sockaddr *)&server_address, sizeof(server_address)) < 0)
     {
@@ -233,7 +291,7 @@ int main(int argc, char *argv[])
             continue;
         }
         char cli_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET,&client.sin_addr,cli_ip,INET_ADDRSTRLEN);
+        inet_ntop(AF_INET, &client.sin_addr, cli_ip, INET_ADDRSTRLEN);
         thread(client_handle, client_fd).detach();
     }
     close(server);

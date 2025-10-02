@@ -3,6 +3,12 @@
 #include <algorithm>
 #include <arpa/inet.h>
 #include <iostream>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <sys/time.h>
+#include <unistd.h>
 using namespace std;
 
 unordered_map<string, string> user_and_password;
@@ -15,11 +21,110 @@ unordered_map<string, vector<string>> group_requests;
 mutex user_mutex;
 mutex group_members_mutex;
 
-string create_user(const vector<string> &tokens){ string response; string username,password; if(tokens.size()!=3) response="Usage: create_user <username> <password>"; else{ username=tokens[1]; password=tokens[2]; lock_guard<mutex> lock(user_mutex); if(user_and_password.find(username)!=user_and_password.end()) response="Username already exists"; else{ user_and_password[username]=password; response="User created successfully"; cout<<"User created: "<<username<<endl;} } return response; }
+string create_user(const vector<string> &tokens)
+{
+    string response;
+    string username, password;
+    if (tokens.size() != 3)
+        response = "Usage: create_user <username> <password>";
+    else
+    {
+        username = tokens[1];
+        password = tokens[2];
+        lock_guard<mutex> lock(user_mutex);
+        if (user_and_password.find(username) != user_and_password.end())
+            response = "Username already exists";
+        else
+        {
+            user_and_password[username] = password;
+            response = "User created successfully";
+            cout << "User created: " << username << endl;
+        }
+    }
+    return response;
+}
 
-string login(const vector<string> &tokens,int client_fd){ string response; if(tokens.size()!=4) response="Usage: login <username> <password>"; else{ string username,password; username=tokens[1]; password=tokens[2]; string peer_port=tokens[3]; lock_guard<mutex> lock(user_mutex); if(user_and_password.find(username)==user_and_password.end()||user_and_password[username]!=password) return "Invalid username or password"; if(client_fd!=-1){ bool logged=false; for(auto &i:client_user) if(i.second==username){logged=true;break;} if(logged) return "User already logged in"; client_user[client_fd]=username;} user_ports[username]=peer_port; response="Login successful"; cout<<"User logged in: "<<username<<" peer="<<peer_port<<endl;} return response; }
+string login(const vector<string> &tokens, int client_fd)
+{
+    string response;
+    if (tokens.size() != 4)
+        response = "Usage: login <username> <password>";
+    else
+    {
+        string username, password;
+        username = tokens[1];
+        password = tokens[2];
+        string peer_port = tokens[3];
+        lock_guard<mutex> lock(user_mutex);
+        if (user_and_password.find(username) == user_and_password.end() || user_and_password[username] != password)
+            return "Invalid username or password";
+        if (client_fd != -1)
+        {
+            bool logged = false;
+            for (auto &i : client_user)
+                if (i.second == username)
+                {
+                    logged = true;
+                    break;
+                }
+            if (logged)
+                return "User already logged in";
+            client_user[client_fd] = username;
+        }
+        user_ports[username] = peer_port;
+        response = "Login successful";
+        cout << "User logged in: " << username << " peer=" << peer_port << endl;
+    }
+    return response;
+}
 
-string logout(const vector<string> &tokens,int client_fd){ string response; if(tokens.size()!=1) response="Usage: logout"; else{ lock_guard<mutex> lock(user_mutex); if(client_user.find(client_fd)==client_user.end()) response="No active session found"; else{ string username=client_user[client_fd]; client_user.erase(client_fd); user_ports.erase(username); response="Logout successful ("+username+")"; cout<<"User logged out: "<<username<<endl; } } return response; }
+string logout(const vector<string> &tokens, int client_fd)
+{
+    string response;
+    if (tokens.size() != 1)
+        response = "Usage: logout";
+    else
+    {
+        lock_guard<mutex> lock(user_mutex);
+        if (client_user.find(client_fd) == client_user.end())
+            response = "No active session found";
+        else
+        {
+            string username = client_user[client_fd];
+            client_user.erase(client_fd);
+            user_ports.erase(username);
+            response = "Logout successful (" + username + ")";
+            cout << "User logged out: " << username << endl;
+        }
+    }
+    return response;
+}
+
+// logout by username (used when forwarding sync or when socket disconnects)
+string logout_by_username(const string &username)
+{
+    lock_guard<mutex> lock(user_mutex);
+    string response;
+    // erase any client_user entries matching this username
+    for (auto it = client_user.begin(); it != client_user.end();)
+    {
+        if (it->second == username)
+            it = client_user.erase(it);
+        else
+            ++it;
+    }
+    if (user_ports.find(username) != user_ports.end())
+    {
+        user_ports.erase(username);
+        response = "Logout successful (" + username + ")";
+        cout << "User logged out: " << username << endl;
+    }
+    else
+    {
+        response = "No active session for " + username;
+    }
+    return response;
+}
 
 string create_group(const vector<string> &tokens, int client_fd)
 {
@@ -27,11 +132,11 @@ string create_group(const vector<string> &tokens, int client_fd)
     string group_id;
     if (tokens.size() != 2)
     {
-    response="Usage: create_group <group_id>";
+        response = "Usage: create_group <group_id>";
     }
     else
     {
-    group_id=tokens[1];
+        group_id = tokens[1];
         lock_guard<mutex> lock(group_members_mutex);
         if (client_user.find(client_fd) == client_user.end())
         {
@@ -43,12 +148,12 @@ string create_group(const vector<string> &tokens, int client_fd)
         }
         else
         {
-            string username=client_user[client_fd];
-            group_leader[group_id]=username;
+            string username = client_user[client_fd];
+            group_leader[group_id] = username;
             group_members[group_id].push_back(username);
-            group_files[group_id]={};
-            response="Group created successfully with ID: "+group_id;
-            cout<<"Group created: "<<group_id<<" by "<<username<<endl;
+            group_files[group_id] = {};
+            response = "Group created successfully with ID: " + group_id;
+            cout << "Group created: " << group_id << " by " << username << endl;
         }
     }
     return response;
@@ -60,11 +165,11 @@ string join_group(const vector<string> &tokens, int client_fd)
     string group_id;
     if (tokens.size() != 2)
     {
-    response="Usage: join_group <group_id>";
+        response = "Usage: join_group <group_id>";
     }
     else
     {
-    group_id=tokens[1];
+        group_id = tokens[1];
         lock_guard<mutex> lock(group_members_mutex);
         if (client_user.find(client_fd) == client_user.end())
         {
@@ -76,7 +181,7 @@ string join_group(const vector<string> &tokens, int client_fd)
         }
         else
         {
-            string username=client_user[client_fd];
+            string username = client_user[client_fd];
             if (group_leader[group_id] == username)
             {
                 response = "You are the leader of this group";
@@ -88,8 +193,8 @@ string join_group(const vector<string> &tokens, int client_fd)
             else
             {
                 group_requests[group_id].push_back(username);
-                response="Join request sent to group leader";
-                cout<<"Join request: user="<<username<<" group="<<group_id<<endl;
+                response = "Join request sent to group leader";
+                cout << "Join request: user=" << username << " group=" << group_id << endl;
             }
         }
     }
@@ -101,7 +206,7 @@ string list_groups(const vector<string> &tokens, int client_fd)
     string response;
     if (tokens.size() != 1)
     {
-    response="Usage: list_groups";
+        response = "Usage: list_groups";
     }
     else
     {
@@ -114,14 +219,14 @@ string list_groups(const vector<string> &tokens, int client_fd)
         {
             if (group_members.empty())
             {
-                response="No groups available";
+                response = "No groups available";
             }
             else
             {
-                response="Groups:\n";
+                response = "Groups:\n";
                 for (auto &it : group_members)
                 {
-                    response+=it.first+"\n";
+                    response += it.first + "\n";
                 }
             }
         }
@@ -134,12 +239,12 @@ string accept_request(const vector<string> &tokens, int client_fd)
     string response;
     if (tokens.size() != 3)
     {
-    response="Usage: accept_request <group_id> <username>";
+        response = "Usage: accept_request <group_id> <username>";
     }
     else
     {
-    string group_id=tokens[1];
-    string username=tokens[2];
+        string group_id = tokens[1];
+        string username = tokens[2];
         lock_guard<mutex> lock(group_members_mutex);
         if (client_user.find(client_fd) == client_user.end())
         {
@@ -159,14 +264,14 @@ string accept_request(const vector<string> &tokens, int client_fd)
             auto it = find(requests.begin(), requests.end(), username);
             if (it == requests.end())
             {
-                response="No such join request found";
+                response = "No such join request found";
             }
             else
             {
                 group_members[group_id].push_back(username);
                 requests.erase(it);
-                response="User "+username+" added to group "+group_id;
-                cout<<"Request accepted: user="<<username<<" group="<<group_id<<endl;
+                response = "User " + username + " added to group " + group_id;
+                cout << "Request accepted: user=" << username << " group=" << group_id << endl;
             }
         }
     }
@@ -178,11 +283,11 @@ string leave_group(const vector<string> &tokens, int client_fd)
     string response;
     if (tokens.size() != 2)
     {
-    response="Usage: leave_group <group_id>";
+        response = "Usage: leave_group <group_id>";
     }
     else
     {
-    string group_id=tokens[1];
+        string group_id = tokens[1];
         lock_guard<mutex> lock(group_members_mutex);
         if (client_user.find(client_fd) == client_user.end())
         {
@@ -194,7 +299,7 @@ string leave_group(const vector<string> &tokens, int client_fd)
         }
         else
         {
-            string username=client_user[client_fd];
+            string username = client_user[client_fd];
             if (group_leader[group_id] == username)
             {
                 if (group_members[group_id].size() == 1)
@@ -202,27 +307,63 @@ string leave_group(const vector<string> &tokens, int client_fd)
                     group_leader.erase(group_id);
                     group_members.erase(group_id);
                     group_requests.erase(group_id);
-                    response="You have left and deleted the group "+group_id+" as you were the only member";
-                    cout<<"Group deleted: "<<group_id<<" by "<<username<<endl;
+                    response = "You have left and deleted the group " + group_id + " as you were the only member";
+                    cout << "Group deleted: " << group_id << " by " << username << endl;
                 }
                 else
                 {
-                    group_leader[group_id]=group_members[group_id][1];
+                    group_leader[group_id] = group_members[group_id][1];
                     group_members[group_id].erase(group_members[group_id].begin());
-                    response="You have left the group "+group_id+". Leadership transferred to "+group_leader[group_id];
-                    cout<<"Leadership transferred for group "<<group_id<<" to "<<group_leader[group_id]<<endl;
+                    response = "You have left the group " + group_id + ". Leadership transferred to " + group_leader[group_id];
+                    cout << "Leadership transferred for group " << group_id << " to " << group_leader[group_id] << endl;
                 }
             }
             else if (find(group_members[group_id].begin(), group_members[group_id].end(), username) == group_members[group_id].end())
             {
-                response="You are not a member of this group";
+                response = "You are not a member of this group";
             }
             else
             {
-                auto it=find(group_members[group_id].begin(),group_members[group_id].end(),username);
+                auto it = find(group_members[group_id].begin(), group_members[group_id].end(), username);
                 group_members[group_id].erase(it);
-                response="You have left the group "+group_id;
-                cout<<"User left group: "<<username<<" group="<<group_id<<endl;
+                response = "You have left the group " + group_id;
+                cout << "User left group: " << username << " group=" << group_id << endl;
+                // Remove files shared by this user in the group
+                {
+                    lock_guard<mutex> flock(files_mutex);
+                    string peerid = to_string(client_fd);
+                    if (user_ports.count(username))
+                        peerid = user_ports[username];
+
+                    // Remove peerid from shared_by for files in this group
+                    if (group_files.count(group_id))
+                    {
+                        for (auto &fi : group_files[group_id])
+                        {
+                            fi.shared_by.erase(peerid);
+                        }
+
+                        // Remove files with no sharers from group_files and all_files
+                        auto &vec = group_files[group_id];
+                        vec.erase(remove_if(vec.begin(), vec.end(), [&](const FileInfo &fi)
+                                            {
+                            if (fi.shared_by.empty())
+                            {
+                                // erase from all_files
+                                for (auto it = all_files.begin(); it != all_files.end();)
+                                {
+                                    if (it->second.filename == fi.filename && it->second.group_id == fi.group_id)
+                                        it = all_files.erase(it);
+                                    else
+                                        ++it;
+                                }
+                                cout<<"Removed file "<<fi.filename<<" from group "<<group_id<<" because no sharers remain"<<endl;
+                                return true;
+                            }
+                            return false; }),
+                                  vec.end());
+                    }
+                }
             }
         }
     }
@@ -234,12 +375,12 @@ string list_requests(const vector<string> &tokens, int client_fd)
     string response;
     if (tokens.size() != 2)
     {
-    response="Usage: list_requests <group_id>";
+        response = "Usage: list_requests <group_id>";
     }
     else
     {
-    string group_id=tokens[1];
-    string username;
+        string group_id = tokens[1];
+        string username;
         lock_guard<mutex> lock(group_members_mutex);
         if (client_user.find(client_fd) == client_user.end())
         {
@@ -247,7 +388,7 @@ string list_requests(const vector<string> &tokens, int client_fd)
         }
         else
         {
-                username=client_user[client_fd];
+            username = client_user[client_fd];
             if (group_members.find(group_id) == group_members.end())
             {
                 response = "Group ID does not exist";
@@ -261,14 +402,14 @@ string list_requests(const vector<string> &tokens, int client_fd)
                 auto &requests = group_requests[group_id];
                 if (requests.empty())
                 {
-                    response="No pending join requests for group "+group_id;
+                    response = "No pending join requests for group " + group_id;
                 }
                 else
                 {
-                    response="Pending join requests for group "+group_id+":\n";
+                    response = "Pending join requests for group " + group_id + ":\n";
                     for (auto &user : requests)
                     {
-                        response+=user+"\n";
+                        response += user + "\n";
                     }
                 }
             }
