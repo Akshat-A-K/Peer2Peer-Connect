@@ -13,6 +13,7 @@
 #include <algorithm>
 #include "tracker_sync.h"
 #include <mutex>
+#include <csignal>
 #include "files.h"
 using namespace std;
 
@@ -20,117 +21,145 @@ using namespace std;
 bool running=true;
 mutex run_mutex;//protects running
 
+// Track incoming sync connection file descriptors
+static unordered_set<int> sync_peer_fds;
+static mutex sync_peer_mutex;
+
 //Mutex to protect user data structures
 void client_handle(int client)
 {
-    //Buffer for incoming data
-    char buffer[1024]={0};
+    string recv_buf;
+    char buffer[4096];
 
     while(1)
     {
-        //Read command from client
-        memset(buffer, 0, sizeof(buffer));
-        int bytes=read(client, buffer, 1024);
+        // Read from socket
+        int bytes=read(client, buffer, sizeof(buffer));
         if(bytes>0)
         {
-            //Process command
-            string command(buffer, bytes);
-            {
-                istringstream _iss(command);
-                string _first;
-                if(_iss>>_first)
-                    cout<<"Received command: "<<_first<<endl;
-            }
-            string response="";
+            // Append to accumulator
+            recv_buf.append(buffer, bytes);
 
-            //Trim newline characters
-            while(!command.empty() && (command.back()=='\n' || command.back()=='\r'))
-                command.pop_back();
+            // Process all complete newline-terminated commands
+            size_t pos;
+            while((pos=recv_buf.find('\n')) != string::npos)
+            {
+                string command=recv_buf.substr(0, pos);
+                recv_buf.erase(0, pos+1);
 
-            //Tokenize command
-            vector<string> tokens;
-            string token;
-            istringstream iss(command);
-            while(iss>>token)
-            {
-                tokens.push_back(token);
-            }
+                // Trim carriage return if present
+                while(!command.empty() && (command.back()=='\r'))
+                    command.pop_back();
 
-            if(tokens.size()==0)
-            {
-                response="Invalid command";
+                // Log first token for visibility
+                {
+                    istringstream _iss(command);
+                    string _first;
+                    if(_iss>>_first)
+                        cout<<"Received command: "<<_first<<endl;
+                }
+
+                string response="";
+
+                // Tokenize command
+                vector<string> tokens;
+                string token;
+                istringstream iss(command);
+                while(iss>>token)
+                    tokens.push_back(token);
+
+                if(tokens.size()==0)
+                {
+                    response="Invalid command";
+                }
+                else if(tokens[0]=="create_user")
+                {
+                    response=create_user(tokens); // create_user <username> <password>
+                }
+                else if(tokens[0]=="login")
+                {
+                    response=login(tokens, client); // login <username> <password> <port>
+                }
+                else if(tokens[0]=="logout")
+                {
+                    response=logout(tokens, client);// logout <username>
+                }
+                else if(tokens[0]=="create_group")
+                {
+                    response=create_group(tokens, client);// create_group <group_id>
+                }
+                else if(tokens[0]=="list_groups")
+                {
+                    response=list_groups(tokens, client);// list_groups
+                }
+                else if(tokens[0]=="join_group")
+                {
+                    response=join_group(tokens, client);// join_group <group_id>
+                }
+                else if(tokens[0]=="accept_request")
+                {
+                    response=accept_request(tokens, client);// accept_request <group_id> <username>
+                }
+                else if(tokens[0]=="leave_group")
+                {
+                    response=leave_group(tokens, client);// leave_group <group_id>
+                }
+                else if(tokens[0]=="list_requests")
+                {
+                    response=list_requests(tokens, client);// list_requests <group_id>
+                }
+                else if(tokens[0]=="upload_file")
+                {
+                    response=upload_file(tokens, client);// upload_file <group_id> <file_path>
+                }
+                else if(tokens[0]=="download_file")
+                {
+                    response=download_file(tokens, client);// download_file <group_id> <file_name> <destination_path>
+                }
+                else if(tokens[0]=="list_files")
+                {
+                    response=list_files_in_group(tokens, client);// list_files <group_id>
+                }
+                else if(tokens[0]=="stop_share")
+                {
+                    response=stop_share(tokens, client);// stop_share <group_id> <file_name>
+                }
+                else
+                {
+                    response="Unknown command";
+                }
+
+                // Determine if this connection is the peer-tracker that we accepted earlier
+                bool from_sync_peer=false;
+                {
+                    lock_guard<mutex> spl(sync_peer_mutex);
+                    if(sync_peer_fds.count(client))
+                        from_sync_peer=true;
+                }
+
+                // Send sync message if this is not already a sync-originated message and not from the peer-accepted socket
+                if(!is_sync_message && !from_sync_peer)
+                {
+                    if(tokens[0] != "list_groups" && tokens[0] != "list_requests" && tokens[0] != "list_files")
+                        send_sync_message(command);
+                }
+
+                //Send response to client
+                send(client, response.c_str(), response.size(), 0);
             }
-            else if(tokens[0]=="create_user")
-            {
-                response=create_user(tokens); // create_user <username> <password> <port
-            }
-            else if(tokens[0]=="login")
-            {
-                response=login(tokens, client); // login <username> <password> <port
-            }
-            else if(tokens[0]=="logout")
-            {
-                response=logout(tokens, client);// logout <username>
-            }
-            else if(tokens[0]=="create_group")
-            {
-                response=create_group(tokens, client);// create_group <group_id>
-            }
-            else if(tokens[0]=="list_groups")
-            {
-                response=list_groups(tokens, client);// list_groups
-            }
-            else if(tokens[0]=="join_group")
-            {
-                response=join_group(tokens, client);// join_group <group_id>
-            }
-            else if(tokens[0]=="accept_request")
-            {
-                response=accept_request(tokens, client);// accept_request <group_id> <username>
-            }
-            else if(tokens[0]=="leave_group")
-            {
-                response=leave_group(tokens, client);// leave_group <group_id>
-            }
-            else if(tokens[0]=="list_requests")
-            {
-                response=list_requests(tokens, client);// list_requests <group_id>
-            }
-            else if(tokens[0]=="upload_file")
-            {
-                response=upload_file(tokens, client);// upload_file <group_id> <file_path>
-            }
-            else if(tokens[0]=="download_file")
-            {
-                response=download_file(tokens, client);// download_file <group_id> <file_name> <destination_path>
-            }
-            else if(tokens[0]=="list_files")
-            {
-                response=list_files_in_group(tokens, client);// list_files <group_id>
-            }
-            else if(tokens[0]=="stop_share")
-            {
-                response=stop_share(tokens, client);// stop_share <group_id> <file_name>
-            }
-            else
-            {
-                response="Unknown command";
-            }
-            //Send sync message if not a sync message itself
-            if(!is_sync_message)
-            {
-                // Avoid sending sync messages for commands that do not change state
-                if(tokens[0] != "list_groups" && tokens[0] != "list_requests" && tokens[0] != "list_files")
-                    send_sync_message(command);
-            }
-            //Send response to client
-            send(client, response.c_str(), response.size(), 0);
         }
         else
         {
             // client disconnected unexpectedly: perform logout for this client_fd
             try
             {
+                // If this fd was a sync-peer, remove it
+                {
+                    lock_guard<mutex> spl(sync_peer_mutex);
+                    if(sync_peer_fds.count(client))
+                        sync_peer_fds.erase(client);
+                }
+
                 // find username for this client_fd
                 string uname;
                 {
@@ -259,6 +288,7 @@ int main(int argc, char *argv[])
                 lock_guard<mutex> lock(run_mutex);
                 running=false;
                 shutdown(sync_socket,SHUT_RDWR);
+                raise(SIGINT); // interrupt any blocking calls
                 break;
             }
         } 
