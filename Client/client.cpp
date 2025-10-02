@@ -462,9 +462,14 @@ void download_file(int tracker_fd, const string &args)
                 bool piece_done = false;
                 while (!piece_done && retries < 5 && !task->cancelled)
                 {
+                    // start from a peer chosen by piece index so different pieces prefer different peers
+                    size_t start_peer = 0;
+                    if (!peers.empty())
+                        start_peer = (size_t)piece % peers.size();
                     for (size_t pi = 0; pi < peers.size() && !piece_done; ++pi)
                     {
-                        int s = connect_to_peer(peers[(pi + i) % peers.size()]);
+                        size_t peer_idx = (start_peer + pi) % peers.size();
+                        int s = connect_to_peer(peers[peer_idx]);
                         if (s < 0)
                             continue;
 
